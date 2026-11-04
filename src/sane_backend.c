@@ -106,6 +106,14 @@ static fn_init       b5_init        = NULL;
 static fn_exit       b5_exit        = NULL;
 static fn_get_devs   b5_get_devs    = NULL;
 static fn_open       b5_open        = NULL;
+static void *g_hook_handle = NULL;  /* hook lib, for the safety abort */
+static SANE_Int  g_bytes_per_line = 0;  /* row size of the current page */
+static long long g_bytes_read = 0;      /* bytes delivered for the current page */
+static SANE_Byte *g_row = NULL;         /* one row held back for the filler check */
+static SANE_Int   g_row_size = 0;
+static SANE_Int   g_row_fill = 0;
+static SANE_Int   g_row_sent = 0;
+static int        g_page_done = 0;
 static fn_close      b5_close       = NULL;
 static fn_get_opt    b5_get_opt     = NULL;
 static fn_ctrl       b5_ctrl        = NULL;
@@ -206,6 +214,7 @@ static SANE_Status load_brscan5(void)
         hook_handle = dlmopen(LM_ID_NEWLM, hook_attempts[i],
                               RTLD_NOW);
         if (hook_handle) {
+            g_hook_handle = hook_handle;
             fprintf(stderr, "[brother5lp] hook lib loaded into fresh LM: %s\n",
                     hook_attempts[i]);
             break;
@@ -468,14 +477,26 @@ SANE_Status sane_control_option(SANE_Handle handle, SANE_Int option,
     return b5_ctrl(handle, option, action, value, info);
 }
 
+static unsigned int true_height(void)
+{
+    unsigned int (*fn)(void) = g_hook_handle ?
+        (unsigned int (*)(void))dlsym(g_hook_handle, "br5lp_true_height") : NULL;
+    return fn ? fn() : 0;
+}
+
 SANE_Status sane_get_parameters(SANE_Handle handle, SANE_Parameters *params)
 {
     SANE_Status r = b5_get_params(handle, params);
     if (r == SANE_STATUS_GOOD && params && params->lines > 0) {
+        unsigned int h = true_height();
+        g_bytes_per_line = params->bytes_per_line;
+        /* brscan5 announces a fixed page and fills the rest with grey. The
+         * scanner's measurement arrives during sane_start, so report the page
+         * as it really is. Unknown length stays -1 for streaming frontends. */
         fprintf(stderr,
-            "[brother5lp] sane_get_parameters: lines %d → -1"
-            " (streaming until scanner ALLEND)\n", params->lines);
-        params->lines = -1;
+            "[brother5lp] sane_get_parameters: lines %d → %d\n",
+            params->lines, h ? (int)h : -1);
+        params->lines = h ? (int)h : -1;
     }
     return r;
 }
@@ -489,6 +510,10 @@ SANE_Status sane_start(SANE_Handle handle)
      * lib latches its mode once per process (pthread_once), so for multiple
      * scans in one long-lived frontend the first scan's mode sticks. */
     setenv("BROTHER_LONG_MODE", g_mode == 2 ? "NARROW" : "WIDE", 1);
+    g_bytes_read = 0;
+    g_bytes_per_line = 0;
+    g_row_fill = g_row_sent = 0;
+    g_page_done = 0;
 
     /* Push the hardware maximum to brscan5 right before starting so it
      * allocates the largest possible read buffer.  The scan itself stops
@@ -508,13 +533,108 @@ SANE_Status sane_start(SANE_Handle handle)
                 SANE_UNFIX(actual), (inf & SANE_INFO_INEXACT) ? " [clamped]" : "");
         }
     }
-    return b5_start(handle);
+    SANE_Status st = b5_start(handle);
+    if (st != SANE_STATUS_GOOD) {
+        /* The scanner may already be feeding, and frontends such as scanimage
+         * do not always cancel after a failed start. Stop the paper. */
+        fprintf(stderr, "[brother5lp] start failed (%d), cancelling scan\n", (int)st);
+        b5_cancel(handle);
+        int (*abort_fn)(void) = g_hook_handle ?
+            (int (*)(void))dlsym(g_hook_handle, "br5lp_abort") : NULL;
+        if (abort_fn)
+            abort_fn();
+        else
+            fprintf(stderr, "[brother5lp] SAFETY: no abort available."
+                            " Press the scanner button.\n");
+    }
+    return st;
+}
+
+/* True when a whole row is brscan5's filler: every byte exactly 128. A real scan
+ * has sensor noise, so an edge-to-edge row of one exact value does not occur. */
+static int row_is_filler(const SANE_Byte *row, SANE_Int n)
+{
+    for (SANE_Int i = 0; i < n; i++)
+        if (row[i] != 128)
+            return 0;
+    return n > 0;
+}
+
+/* Long pages: the scanner's height stays at the driver's cap, so the end of the
+ * page is only visible as the start of the filler. Pass whole rows and stop
+ * there. Rows are held back so the file never ends on half a filler row. */
+static SANE_Status read_until_filler(SANE_Handle handle, SANE_Byte *data,
+                                     SANE_Int max_length, SANE_Int *length)
+{
+    *length = 0;
+    if (!g_row || g_row_size != g_bytes_per_line) {
+        free(g_row);
+        g_row = malloc((size_t)g_bytes_per_line);
+        g_row_size = g_row ? g_bytes_per_line : 0;
+        g_row_fill = g_row_sent = 0;
+        if (!g_row)
+            return SANE_STATUS_NO_MEM;
+    }
+    while (*length < max_length) {
+        if (g_row_sent < g_row_fill) {
+            SANE_Int n = g_row_fill - g_row_sent;
+            if (n > max_length - *length)
+                n = max_length - *length;
+            memcpy(data + *length, g_row + g_row_sent, (size_t)n);
+            g_row_sent += n;
+            *length += n;
+            continue;
+        }
+        if (g_page_done)
+            break;
+        g_row_fill = g_row_sent = 0;
+        while (g_row_fill < g_row_size) {
+            SANE_Int got = 0;
+            SANE_Status r = b5_read(handle, g_row + g_row_fill,
+                                    g_row_size - g_row_fill, &got);
+            g_row_fill += got;
+            if (r == SANE_STATUS_EOF) {
+                g_page_done = 1;
+                break;
+            }
+            if (r != SANE_STATUS_GOOD)
+                return *length ? SANE_STATUS_GOOD : r;
+            if (got == 0)
+                return SANE_STATUS_GOOD;
+        }
+        if (g_row_fill == g_row_size && row_is_filler(g_row, g_row_size)) {
+            fprintf(stderr, "[brother5lp] end of page at row %lld\n",
+                    g_bytes_read / g_row_size);
+            g_page_done = 1;
+            g_row_fill = 0;
+        }
+    }
+    g_bytes_read += *length;
+    return (*length == 0 && g_page_done) ? SANE_STATUS_EOF : SANE_STATUS_GOOD;
 }
 
 SANE_Status sane_read(SANE_Handle handle, SANE_Byte *data,
                        SANE_Int max_length, SANE_Int *length)
 {
-    return b5_read(handle, data, max_length, length);
+    unsigned int h = true_height();
+    long long limit = (h && g_bytes_per_line > 0) ?
+        (long long)h * g_bytes_per_line : -1;
+
+    if (limit < 0 && g_bytes_per_line > 0)
+        return read_until_filler(handle, data, max_length, length);
+
+    /* Stop at the end of the real page, before brscan5's grey filler. */
+    if (limit >= 0 && g_bytes_read >= limit) {
+        *length = 0;
+        return SANE_STATUS_EOF;
+    }
+    SANE_Status r = b5_read(handle, data, max_length, length);
+    if (r == SANE_STATUS_GOOD && *length > 0) {
+        if (limit >= 0 && g_bytes_read + *length > limit)
+            *length = (SANE_Int)(limit - g_bytes_read);
+        g_bytes_read += *length;
+    }
+    return r;
 }
 
 void sane_cancel(SANE_Handle handle)

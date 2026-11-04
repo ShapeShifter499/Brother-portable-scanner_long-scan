@@ -15,8 +15,10 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 
 | Hardware | Status |
 |---|---|
-| Brother DS-740D | ✅ Tested and working (Arch Linux) |
-| Brother ADS-1200 | ⚠️ Implemented, not yet tested |
+| Brother DS-740D | ✅ 33 in scan tested on brscan5 1.7.0 (Arch Linux); U-shaped path, so guide long paper |
+| Brother ADS-1200 | ✅ 33 in scan tested on brscan5 1.7.0; reports a 36 in maximum |
+
+Long paper is one-sided. For a two-sided document, scan each side in its own pass.
 
 **Platform:** Arch Linux (and derivatives). Should work on any distro with `brscan5` and `sane` installed; only the AUR package is provided for now.
 

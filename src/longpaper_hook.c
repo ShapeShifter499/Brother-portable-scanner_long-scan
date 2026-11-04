@@ -56,6 +56,9 @@
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <time.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -121,6 +124,12 @@ static sane_get_opt_fn    real_get_opt       = NULL;
 static sane_ctrl_fn       real_ctrl_opt      = NULL;
 static sane_get_params_fn real_get_params    = NULL;
 static sane_start_fn      real_sane_start    = NULL;
+static libusb_device_handle *g_last_handle = NULL;
+static unsigned char g_out_endpoint = 0;
+static int g_scan_started = 0;
+static unsigned int g_area_y2 = 0;      /* driver's height cap for this page */
+static unsigned int g_true_height = 0;  /* height the scanner reported */
+static int g_abt_seen = 0;
 static cpp_setheight_fn   real_devimg_sh     = NULL; /* DeviceImageJpeg::SetHeight  */
 static cpp_setheight_fn   real_decodeparam_sh= NULL; /* DecodeParameter::SetHeight  */
 static cpp_appendwhite_fn real_append_white  = NULL; /* BitmapImage::AppendWhiteLines */
@@ -285,9 +294,57 @@ static bool is_scan_cmd(const uint8_t *data, int length) {
 /* ── Long paper command patch ──────────────────────────────────── */
 
 /* Print printable content of a USB command buffer to stderr. */
+/* Scan data must never reach a log, so a reply is printed only when it is short
+ * and every byte is protocol text. Anything else is recorded as a size. */
+static void log_cmd(const char *prefix, const uint8_t *buf, int len);
+int br5lp_abort(void);
+
+/* Experiment only: BR5LP_DUMP=<file> saves everything the scanner sends once a
+ * scan starts, so this captures the document. Off unless set, and never use it
+ * on anything private. Each record is a 4-byte little-endian length, then data. */
+static void dump_reply(int rc, const uint8_t *buf, int len)
+{
+    static int fd = -2;
+    uint32_t n = (uint32_t)len;
+
+    if (fd == -2) {
+        const char *path = getenv("BR5LP_DUMP");
+        fd = path ? open(path, O_CREAT | O_WRONLY | O_APPEND, 0600) : -1;
+    }
+    if (fd < 0 || rc != 0 || len <= 0 || !g_scan_started)
+        return;
+    if (write(fd, &n, sizeof(n)) != (ssize_t)sizeof(n) ||
+        write(fd, buf, (size_t)len) != (ssize_t)len)
+        fprintf(stderr, "[br5longpaper] dump write failed\n");
+}
+
+static void log_reply(int rc, const uint8_t *buf, int len) {
+    int text = len > 0 && len <= 256;
+    for (int i = 0; text && i < len; i++) {
+        uint8_t c = buf[i];
+        if (!((c >= 0x20 && c < 0x7f) || c == '\n' || c == '\r' ||
+              c == 0x1b || c == 0x80))
+            text = 0;
+    }
+    /* Before XSC the scanner has only sent status and capability replies, so
+     * no image data can exist yet and the whole reply is safe to record. */
+    if (text || (!g_scan_started && len > 0 && len <= 2048))
+        log_cmd("IN text", buf, len);
+    else if (len > 0 && len <= 16)
+        fprintf(stderr, "[br5longpaper] IN status rc=%d %d bytes first=%02x\n",
+                rc, len, buf[0]);
+    else {
+        /* Times and sizes only. Gaps here show the scanner waiting on the host. */
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        fprintf(stderr, "[br5longpaper] IN rc=%d %d bytes t=%ld.%03ld\n", rc, len,
+                (long)ts.tv_sec, ts.tv_nsec / 1000000);
+    }
+}
+
 static void log_cmd(const char *prefix, const uint8_t *buf, int len) {
     fprintf(stderr, "[br5longpaper] %s (%d bytes): ", prefix, len);
-    for (int i = 0; i < len && i < 512; i++) {
+    for (int i = 0; i < len && i < 2048; i++) {
         uint8_t c = buf[i];
         if (c == '\r') fprintf(stderr, "\\r");
         else if (c == '\n') fprintf(stderr, "\\n");
@@ -325,6 +382,9 @@ static int patch_xsc_area(uint8_t *buf, int len, int max_len) {
     long x1, y1, x2, y2;
     if (sscanf(val, "%ld,%ld,%ld,%ld", &x1, &y1, &x2, &y2) != 4)
         return len;                              /* unexpected format, skip */
+
+    g_area_y2 = (unsigned int)y2;   /* the driver's own cap, before we raise it */
+    g_true_height = 0;              /* new page: forget the previous height */
 
     /* Compute the y2 ceiling from the frontend-requested br-y.
      * g_resolution is tracked from sane_control_option; defaults to 300.
@@ -399,9 +459,34 @@ static int patch_cmd_long_paper(uint8_t *buf, int len, int max_len,
     /* SSP: set PTYPE and enable LONG flag. */
     if (cmd_is(buf, len, "\x1bSSP\n")) {
         const char *ptype = (mode == 1) ? "LONGPAPER_WIDE" : "LONGPAPER_NARROW";
+        /* Experiment only: BR5LP_FORCE=area|lsmd|long sends less than the full
+         * long-paper setup, to find which flag a scanner rejects when duplex
+         * is on. Unset, the full setup below runs as normal. */
+        const char *force = getenv("BR5LP_FORCE");
+        int r;
+
+        /* The scanner rejects this pair at setup, and the driver only reports
+         * "Invalid argument", so say what actually happened. */
+        if (!force && buf_find(buf, len, "DPLX=ON"))
+            fprintf(stderr, "[br5longpaper] long paper is one-sided: the scanner"
+                            " rejects duplex. Scan each side in its own pass.\n");
+
+        if (force) {
+            if (strcmp(force, "area") == 0)
+                return len;
+            r = buf_replace_val(buf, len, max_len, "LSMD=", "ON");
+            if (r < 0) return -1;
+            len = r;
+            if (strcmp(force, "long") == 0) {
+                r = buf_replace_val(buf, len, max_len, "LONG=", "ON");
+                if (r < 0) return -1;
+                len = r;
+            }
+            return len;
+        }
 
         /* Replace or insert PTYPE= */
-        int r = buf_replace_val(buf, len, max_len, "PTYPE=", ptype);
+        r = buf_replace_val(buf, len, max_len, "PTYPE=", ptype);
         if (r == -2) return -1;
         if (r == -1) {
             len = buf_insert_kv(buf, len, max_len, "PTYPE=", ptype);
@@ -467,8 +552,34 @@ int libusb_bulk_transfer(libusb_device_handle *dev_handle,
     int debug = (getenv("BROTHER_SCAN_DEBUG") != NULL);
 
     if (!(endpoint & LIBUSB_ENDPOINT_IN)) {
+        g_last_handle = dev_handle;
+        g_out_endpoint = endpoint;
+        if (cmd_is(data, length, "\x1b" "ABT"))
+            g_abt_seen = 1;
+        if (cmd_is(data, length, "\x1bXSC\n")) {
+            g_scan_started = 1;
+            g_abt_seen = 0;
+        }
         if (debug)
             log_cmd("OUT raw", data, length);
+    }
+
+    if (endpoint & LIBUSB_ENDPOINT_IN) {
+        int rc = real_usb_bulk(dev_handle, endpoint, data, length,
+                               actual_length, timeout);
+        if (debug)
+            log_reply(rc, data, actual_length ? *actual_length : 0);
+        dump_reply(rc, data, actual_length ? *actual_length : 0);
+        /* The driver closes the connection soon after a failed read, so stop
+         * the paper here, while the handle is still open. Timeouts are normal
+         * polling and are left alone. */
+        if (g_scan_started && !g_abt_seen &&
+            (rc == LIBUSB_ERROR_IO || rc == LIBUSB_ERROR_PIPE ||
+             rc == LIBUSB_ERROR_OVERFLOW)) {
+            fprintf(stderr, "[br5longpaper] SAFETY: USB read failed (%d)\n", rc);
+            br5lp_abort();
+        }
+        return rc;
     }
 
     /* Only intercept outgoing (host→device) scan commands */
@@ -504,6 +615,46 @@ int libusb_bulk_transfer(libusb_device_handle *dev_handle,
 
     return real_usb_bulk(dev_handle, endpoint, data, length,
                           actual_length, timeout);
+}
+
+/* Forget the handle when the driver closes it, so br5lp_abort can never
+ * write through a closed connection. */
+void libusb_close(libusb_device_handle *dev_handle) {
+    static void (*real_close)(libusb_device_handle *) = NULL;
+    if (!real_close)
+        real_close = (void (*)(libusb_device_handle *))dlsym(RTLD_NEXT,
+                                                             "libusb_close");
+    if (dev_handle == g_last_handle)
+        g_last_handle = NULL;
+    if (real_close)
+        real_close(dev_handle);
+}
+
+/* Height the scanner measured for the current page, or 0 if not known yet. */
+unsigned int br5lp_true_height(void) {
+    return g_true_height;
+}
+
+/* Safety stop. Long-paper mode tells the scanner to feed until the page ends,
+ * so a driver failure after XSC can leave the rollers pulling paper with
+ * nothing reading it. Returns 0 when an ABT went out or the driver sent one. */
+int br5lp_abort(void) {
+    static const unsigned char abt[] = "\x1b" "ABT\n\x80";
+    int sent = 0;
+
+    if (!g_scan_started || g_abt_seen)
+        return 0;
+    if (!g_last_handle || !real_usb_bulk) {
+        fprintf(stderr, "[br5longpaper] SAFETY: cannot send ABT, connection"
+                        " already closed. Press the scanner button.\n");
+        return -1;
+    }
+    int rc = real_usb_bulk(g_last_handle, g_out_endpoint, (unsigned char *)abt,
+                           (int)sizeof(abt) - 1, &sent, 2000);
+    fprintf(stderr, "[br5longpaper] SAFETY: sent ABT rc=%d bytes=%d\n", rc, sent);
+    if (rc == 0)
+        g_abt_seen = 1;
+    return rc;
 }
 
 /* ── 2. sane_get_option_descriptor ────────────────────────────── */
@@ -782,11 +933,12 @@ SANE_Status sane_start(SANE_Handle handle) {
  *
  * We intercept the C++ mangled symbols directly via LD_PRELOAD.  When
  * long-paper mode is active and the height is at or below the capability
- * cap (< 30 000px = ~100" at 300dpi), we replace it with 65 536px
- * (~218" at 300dpi, 109" at 600dpi) — well above DS-740D's 72" hardware
- * max in all cases.  The scanner's own ALLEND (paper-exit) signal stops
- * the scan at the true document length, so the extra headroom is never
- * consumed and causes no memory overhead (the buffer grows line-by-line).
+ * cap (< 30 000px = ~100" at 300dpi), we raise it to 65 536px (~218" at
+ * 300dpi, 109" at 600dpi), above DS-740D's 72" hardware max.  A height that
+ * differs from the driver's cap is the scanner's measurement of the page and
+ * is kept, then reused for DecodeParameter: forcing 65 536 there made the
+ * decoder wait for rows that never came (seen on brscan5 1.7.0, and the same
+ * "Corrupt JPEG" warning is in a March run on the older driver).
  *
  * Symbol names (from nm -D libLxBsScanCoreApi.so.3.2.1):
  *   _ZN15DeviceImageJpeg9SetHeightEj   DeviceImageJpeg::SetHeight(unsigned)
@@ -800,9 +952,18 @@ void _ZN15DeviceImageJpeg9SetHeightEj(void *self, unsigned int h) {
                              "_ZN15DeviceImageJpeg9SetHeightEj");
     ensure_init();
     if (g_mode && h > 0 && h < 30000) {
-        fprintf(stderr,
-            "[br5longpaper] DeviceImageJpeg::SetHeight %u → 65536 px\n", h);
-        h = 65536;
+        if (h != g_area_y2) {
+            /* Not the driver's cap, so this is the scanner's measurement of the
+             * page. Overriding it leaves the decoder waiting for rows that do
+             * not exist, which corrupts the JPEG and the output size. */
+            g_true_height = h;
+            fprintf(stderr,
+                "[br5longpaper] DeviceImageJpeg::SetHeight %u kept (scanner measured)\n", h);
+        } else {
+            fprintf(stderr,
+                "[br5longpaper] DeviceImageJpeg::SetHeight %u → 65536 px\n", h);
+            h = 65536;
+        }
     }
     if (real_devimg_sh) real_devimg_sh(self, h);
 }
@@ -814,9 +975,10 @@ void _ZN15DecodeParameter9SetHeightEj(void *self, unsigned int h) {
                                   "_ZN15DecodeParameter9SetHeightEj");
     ensure_init();
     if (g_mode && h > 0 && h < 30000) {
+        unsigned int want = g_true_height ? g_true_height : 65536;
         fprintf(stderr,
-            "[br5longpaper] DecodeParameter::SetHeight %u → 65536 px\n", h);
-        h = 65536;
+            "[br5longpaper] DecodeParameter::SetHeight %u → %u px\n", h, want);
+        h = want;
     }
     if (real_decodeparam_sh) real_decodeparam_sh(self, h);
 }

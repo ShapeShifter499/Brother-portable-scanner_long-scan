@@ -197,3 +197,55 @@ BROTHER_LONG_MODE=WIDE LD_PRELOAD=./libbr5longpaper.so \
 # 6. Verify output dimensions
 identify long_test.tiff | grep 'x[0-9]'
 ```
+
+## Hardware results (2026-11-04, brscan5 1.7.0)
+
+Tested with a 33 inch taped, two-sided test scroll carrying QR markers.
+
+| Scanner | One-sided long | Reported long max | Feed path |
+|---|---|---|---|
+| DS-740D | 33.5 in, clean; sheet swing up to about 2.7 degrees on one side | 1828.8 mm | U-shaped |
+| ADS-1200 | 33.0 to 33.1 in, clean, 9 s per side | 914.4 mm, then values 300,300 | Mostly straight |
+
+The stock driver stops the same page with "Document feeder jammed".
+
+### Capability reply (QDI)
+
+Binary tag, length, value records, 0.1 mm units. Tag `0x0306` holds the long-paper
+maximum as a 32-bit value. On the ADS-1200 two 16-bit values of 300 follow it, probably
+a long-paper resolution cap. The DS-740D has zeros there. This is inferred from
+reading the bytes, not documented.
+
+### Page height
+
+Short pages: `DeviceImageJpeg::SetHeight` gets the scanner's measured height.
+Long pages: it gets the driver's cap (4200 at 300 dpi), and the driver pads the
+output with rows of exactly 128 up to a fixed line count. The backend reports the
+measured height when it has one, and otherwise stops at the first filler row.
+
+The "Corrupt JPEG data" warning comes from the scanner's padded height in the JPEG
+header (16959 rows) with the stream ending early. Images are complete.
+
+### Duplex
+
+`LONGPAPER_WIDE` with `DPLX=ON` is rejected at SSP, with an 8-byte reply starting
+0x83, before any paper moves.
+
+`BR5LP_FORCE=area` leaves SSP untouched and only raises the XSC area. The scanner
+then scans both sides in one pass, but the driver hangs decoding, so the data has to
+be captured with `BR5LP_DUMP`. The stream is 14-byte block headers (byte 2 is the side,
+bytes 6-9 the block size) followed by one JPEG per side.
+
+**Do not use this on real documents.** All of side 1 arrives before side 2, so the
+scanner has to hold side 2 in its own memory. On the ADS-1200 the bottom of side 2 came
+back corrupted even though every declared byte arrived and the scan reported success.
+A memory overflow is the likely cause, but that is unproven. Scan each side in its
+own pass.
+
+### Feeding
+
+Long paper needs a clear exit and support on both sides. On the DS-740D's U-shaped
+path the exiting end can meet the entering end and fold the page.
+
+Both scanners listed under the same SANE name when they shared a USB bus. On
+separate buses the names differ.
