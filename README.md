@@ -15,11 +15,13 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 
 | Hardware | Status |
 |---|---|
-| Brother DS-740D | ✅ 33 in scan tested on brscan5 1.7.0 (Arch Linux); U-shaped path, so guide long paper |
-| Brother ADS-1200 | ✅ 33 in scan tested on brscan5 1.7.0; reports a 36 in maximum |
+| Brother DS-740D | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; U-shaped path, so guide long paper |
+| Brother ADS-1200 | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; reports a 36 in maximum |
 
 > **Long paper is single-sided only.** The scanners reject long paper with duplex.
 > For a two-sided document, scan it once, turn it over, and scan it again.
+
+These results come from `scan-long`. GUI apps have not been retested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
 
 **Platform:** Arch Linux (and derivatives). Should work on any distro with `brscan5` and `sane` installed; only an Arch package is provided for now.
 
@@ -119,7 +121,7 @@ If `promoted to RTLD_GLOBAL` is missing, the USB and C++ hooks will not fire.
 
 ## Contributing
 
-Testing reports — especially for the ADS-1200 — are very welcome. Open an issue with the debug log output and a description of what did or didn't work.
+Testing reports are very welcome, especially from GUI apps. Open an issue with the debug log output and a description of what did or didn't work.
 
 ## License
 
