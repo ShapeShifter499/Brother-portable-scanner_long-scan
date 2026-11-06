@@ -18,9 +18,10 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 | Brother DS-740D | ✅ 33 in scan tested on brscan5 1.7.0 (Arch Linux); U-shaped path, so guide long paper |
 | Brother ADS-1200 | ✅ 33 in scan tested on brscan5 1.7.0; reports a 36 in maximum |
 
-Long paper is one-sided. For a two-sided document, scan each side in its own pass.
+> **Long paper is single-sided only.** The scanners reject long paper with duplex.
+> For a two-sided document, scan it once, turn it over, and scan it again.
 
-**Platform:** Arch Linux (and derivatives). Should work on any distro with `brscan5` and `sane` installed; only the AUR package is provided for now.
+**Platform:** Arch Linux (and derivatives). Should work on any distro with `brscan5` and `sane` installed; only an Arch package is provided for now.
 
 ## How it works
 
@@ -36,31 +37,34 @@ Select the **\[Long Paper\]** device and the backend handles everything internal
 - Injects `PTYPE=LONGPAPER_WIDE`, `LONG=ON`, `LSMD=ON` into the USB scan commands
 - Extends the scan area beyond the driver's built-in ADF cap
 - Stops automatically when the paper exits the ADF — same behaviour as Windows
-- Trims trailing blank rows from the output image
+- Drops the filler rows the scanner sends after the page ends; blank paper in the document is kept
 - Exposes up to 5000 mm br-y range to the frontend; set page height in your scanning app to control the maximum scan length
 
 No `LD_PRELOAD`, no patching of system files, no configuration beyond selecting the device.
 
 ## Installation
 
-### AUR (Arch Linux)
+### Arch Linux
+
+Install [`brscan5`](https://aur.archlinux.org/packages/brscan5) from the AUR first, then build this package:
 
 ```bash
-git clone https://github.com/ShapeShifter499/Brother-prortable-scanner_long-scan
-cd Brother-prortable-scanner_long-scan/pkg
+git clone https://github.com/ShapeShifter499/Brother-portable-scanner_long-scan
+cd Brother-portable-scanner_long-scan/pkg
 makepkg -si
 ```
 
-The package depends on `brscan5` and `sane`. After install, `brother5lp` is added to `/etc/sane.d/dll.conf` automatically.
+The package adds `/etc/sane.d/dll.d/brother5lp`, so the **\[Long Paper\]** devices appear with no further setup. It is not on the AUR yet.
+
+If you used `sudo make install` before, remove those files first. A `scan-long` left in `/usr/local/bin` runs instead of the packaged one.
 
 ### Manual (other distros)
 
 ```bash
-git clone https://github.com/ShapeShifter499/Brother-prortable-scanner_long-scan
-cd Brother-prortable-scanner_long-scan
+git clone https://github.com/ShapeShifter499/Brother-portable-scanner_long-scan
+cd Brother-portable-scanner_long-scan
 make
 sudo make install
-echo 'brother5lp' | sudo tee -a /etc/sane.d/dll.conf
 ```
 
 Requires: `gcc`, `libsane-dev` (or `sane`), `libusb-1.0-dev`.
@@ -72,7 +76,10 @@ Requires: `gcc`, `libsane-dev` (or `sane`), `libusb-1.0-dev`.
 1. Open your scanning app
 2. Select **Brother DS-740D \[Long Paper\]** (or equivalent) as the device
 3. Set page height to the maximum you want to scan (e.g. 1000 mm for a long receipt)
-4. Feed the document — scanning stops automatically when the paper exits
+4. Feed the document. Scanning stops automatically when the paper exits
+5. Support long paper on both sides, and keep it clear of the scanner's entry
+
+Choose a single-sided source. The duplex sources do not work with long paper.
 
 ### CLI
 
@@ -80,21 +87,20 @@ Requires: `gcc`, `libsane-dev` (or `sane`), `libusb-1.0-dev`.
 scan-long --output receipt.png
 ```
 
-Options:
+Single-sided only. Options:
 
 ```
 --output FILE       Output file (default: scan_YYYYMMDD_HHMMSS.png)
---mode WIDE|NARROW  Paper width mode (default: WIDE)
 --resolution DPI    Scan resolution (default: 300)
---length MM         Maximum scan length in mm (default: 1829 / 72 inches)
---debug             Print verbose USB command log to stderr
+--length MM         Maximum length (default: the scanner's reported maximum)
+--device DEVICE     Needed when more than one scanner is connected
 ```
 
 ## Building from source
 
 ```bash
 make          # builds libbr5longpaper.so and libsane-brother5lp.so.1
-make install  # installs to /usr/local/lib and /usr/local/lib/sane
+sudo make install  # installs under /usr/local and registers the backend in /etc/sane.d/dll.d
 ```
 
 ## Troubleshooting

@@ -1,48 +1,32 @@
 # Maintainer: ShapeShifter499
 pkgname=brscan5-longpaper-git
-pkgver=r1.0
+_repo=Brother-portable-scanner_long-scan
+pkgver=r22.16eb60e
 pkgrel=1
-pkgdesc="Long paper scanning for Brother DS-740D and ADS-1200 via a proper SANE backend"
+pkgdesc="SANE backend for single-sided long paper scanning on Brother DS-740D and ADS-1200"
 arch=('x86_64')
-url="https://github.com/shapeshifter499/brother-prortable-scanner_long-scan"
-license=('GPL2')
-depends=('brscan5' 'libusb' 'sane')
-makedepends=('gcc')
-provides=('brscan5-longpaper')
-conflicts=('brscan5-longpaper')
-install=brscan5-longpaper.install
-source=("$pkgname::git+$url")
+url="https://github.com/ShapeShifter499/${_repo}"
+license=('GPL-2.0-only')
+depends=('bash' 'brscan5' 'glibc' 'libusb' 'sane')
+makedepends=('git')
+optdepends=('imagemagick: save scan-long output as PNG, JPEG or PDF')
+provides=("${pkgname%-git}")
+conflicts=("${pkgname%-git}")
+backup=('etc/sane.d/dll.d/brother5lp')
+source=("git+${url}.git")
 sha256sums=('SKIP')
 
 pkgver() {
-    cd "$pkgname"
+    cd "$_repo"
     printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-    cd "$pkgname"
+    cd "$_repo"
     make
 }
 
 package() {
-    cd "$pkgname"
-
-    # ── SANE backend ──────────────────────────────────────────────────────
-    # Installed to /usr/lib/sane/ alongside the other SANE backends.
-    # Registered in dll.conf by the .install scriptlet so SANE frontends
-    # discover "Brother DS-740D [Long Paper]" automatically.
-    install -Dm755 libsane-brother5lp.so.1 \
-        "$pkgdir/usr/lib/sane/libsane-brother5lp.so.1"
-    ln -s libsane-brother5lp.so.1 \
-        "$pkgdir/usr/lib/sane/libsane-brother5lp.so"
-
-    # ── LD_PRELOAD hook library ───────────────────────────────────────────
-    # Used by scan-long (CLI helper) and as a fallback for apps that load
-    # sane backends without going through the dll frontend.
-    install -Dm755 libbr5longpaper.so \
-        "$pkgdir/usr/lib/libbr5longpaper.so"
-
-    # ── CLI scan helper ───────────────────────────────────────────────────
-    install -Dm755 scan_long.sh \
-        "$pkgdir/usr/bin/scan-long"
+    cd "$_repo"
+    make DESTDIR="$pkgdir" PREFIX=/usr install
 }

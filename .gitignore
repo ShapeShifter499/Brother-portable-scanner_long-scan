@@ -1,0 +1,8 @@
+# Build output
+*.so
+*.so.1
+
+# makepkg output
+pkg/*
+!pkg/PKGBUILD
+!pkg/.SRCINFO

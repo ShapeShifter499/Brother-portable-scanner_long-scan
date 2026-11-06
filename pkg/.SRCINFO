@@ -1,0 +1,21 @@
+pkgbase = brscan5-longpaper-git
+	pkgdesc = SANE backend for single-sided long paper scanning on Brother DS-740D and ADS-1200
+	pkgver = r22.16eb60e
+	pkgrel = 1
+	url = https://github.com/ShapeShifter499/Brother-portable-scanner_long-scan
+	arch = x86_64
+	license = GPL-2.0-only
+	makedepends = git
+	depends = bash
+	depends = brscan5
+	depends = glibc
+	depends = libusb
+	depends = sane
+	optdepends = imagemagick: save scan-long output as PNG, JPEG or PDF
+	provides = brscan5-longpaper
+	conflicts = brscan5-longpaper
+	backup = etc/sane.d/dll.d/brother5lp
+	source = git+https://github.com/ShapeShifter499/Brother-portable-scanner_long-scan.git
+	sha256sums = SKIP
+
+pkgname = brscan5-longpaper-git
