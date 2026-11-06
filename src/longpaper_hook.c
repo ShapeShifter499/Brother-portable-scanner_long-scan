@@ -380,8 +380,11 @@ static int patch_xsc_area(uint8_t *buf, int len, int max_len) {
     val[vlen] = '\0';
 
     long x1, y1, x2, y2;
-    if (sscanf(val, "%ld,%ld,%ld,%ld", &x1, &y1, &x2, &y2) != 4)
-        return len;                              /* unexpected format, skip */
+    if (sscanf(val, "%ld,%ld,%ld,%ld", &x1, &y1, &x2, &y2) != 4) {
+        fprintf(stderr, "[br5longpaper] WARNING: XSC AREA=%s has no height to"
+                        " extend, the scan may stop early\n", val);
+        return len;
+    }
 
     g_area_y2 = (unsigned int)y2;   /* the driver's own cap, before we raise it */
     g_true_height = 0;              /* new page: forget the previous height */

@@ -260,5 +260,46 @@ for the DS-740D:
 The guide also says 2-sided scanning is not available for Long Paper. It lists both
 the Long Paper setting and an open Output Guide as causes of skewed images.
 
+## Capabilities reported by QDI
+
+The QDI reply is a list of entries: a 16-bit tag, a 16-bit length, then the value,
+all little-endian. The labels below come from the log strings in
+`libLxBsScanCoreApi.so.3.2.6`.
+
+Tag `0x0306` describes long paper. Lengths are in units of 0.1 mm:
+
+| Field | DS-740D | ADS-1200 |
+|---|---|---|
+| `longPaperSizeSimplexMax` | 18288 | 9144 |
+| `longPaperSizeDuplexMax` | 0 | 0 |
+| `longPaperSimplexLengthSpecificationMethod` | 2 | 2 |
+| `longPaperDuplexLengthSpecificationMethod` | 0 | 0 |
+| `longPaperMaxResolutionX`, `Y` | 0, 0 | 300, 300 |
+
+Whether 0 means the DS-740D has no resolution limit has not been tested.
+
+Tag `0x050a` is `autoDocumentSize` and tag `0x050b` is `deskew`. Each holds a
+capability byte, an interlocking byte and an X and Y resolution limit. Both scanners
+report a 300 x 300 limit for each.
+
+## Auto Document Size and deskew
+
+`AutoDocumentSize` makes the driver send `AREA=ATDSKW` in place of a numeric area, so
+the hook has no height to extend. Where the correction happens is not known. The
+scanners report it as a capability and the driver has a status message for a deskew
+failure, but `libLxBsScanCoreApi` also contains rotation and paper corner code. Long
+scans send `AREA=NORMAL`, `DSKW=OFF` and `ATCRP=OFF`.
+
+## End of a long page
+
+brscan5 pads a long page with filler rows up to its full height. A frontend that scans
+a whole feeder calls `sane_start` again after each page. If the page was not read to
+the driver's EOF, that call succeeds without any USB traffic and returns filler as a
+new page. Once the page is read to EOF, `sane_start` still succeeds, then `sane_read`
+returns `SANE_STATUS_NO_DOCS`. Simple Scan accepts that as the end of the document.
+
+The last rows of a page can be mixed with filler by JPEG compression, so they are not
+exactly 128 and are not detected as filler. They appear as up to about 1.4 mm of grey.
+
 Both scanners listed under the same SANE name when they shared a USB bus. On
 separate buses the names differ.

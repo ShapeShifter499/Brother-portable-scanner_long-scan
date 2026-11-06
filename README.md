@@ -21,7 +21,7 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 > **Long paper is single-sided only.** The scanners reject long paper with duplex, and Brother's DS-740D guide says 2-sided scanning is not available for Long Paper.
 > For a two-sided document, scan it once, turn it over, and scan it again.
 
-These results come from `scan-long`. GUI apps have not been retested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
+These results come from `scan-long`. Simple Scan 50.0 has also been tested on the DS-740D in Text and Photo modes. Other GUI apps, and any GUI app on the ADS-1200, have not been tested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
 
 **Platform:** Arch Linux (and derivatives). Should work on any distro with `brscan5` and `sane` installed; only an Arch package is provided for now.
 
@@ -84,6 +84,12 @@ Requires: `gcc`, `libsane-dev` (or `sane`), `libusb-1.0-dev`.
 On the DS-740D, keep the **Output Guide** closed so paper passes straight through. Opening it sends paper around a U-bend and out of the top. Brother rates that route for paper up to 297 mm long, and lists an open Output Guide as a cause of skewed scans and jams.
 
 Choose a single-sided source. The duplex sources do not work with long paper.
+
+Long-paper devices keep Brother's Auto Document Size option off, because it cannot work with a page of unknown length. Your scanning app may turn it on, and the backend turns it back off.
+
+In Simple Scan, Text mode saves only 4 shades of grey. Use Photo mode to keep full detail.
+
+Long scans can end with up to about 1.4 mm of grey at the bottom, where the driver's filler begins. It is left in place, so that real content is never trimmed.
 
 ### CLI
 

@@ -63,6 +63,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <unistd.h>    /* usleep */
 
 #include <sane/sane.h>
 
@@ -134,6 +135,7 @@ static SANE_Fixed g_br_y_backend_max = 0;   /* brscan5's original br-y maximum  
 static int        g_resolution       = 300; /* DPI, updated from sane_control_option         */
 static SANE_Int   g_br_y_opt_num     = -1;
 static SANE_Int   g_br_x_opt_num     = -1;
+static SANE_Int   g_auto_size_opt_num = -1;
 static SANE_Int   g_res_opt_num      = -1;
 
 /* Extended br-y option descriptor */
@@ -383,6 +385,7 @@ SANE_Status sane_open(SANE_String_Const devicename, SANE_Handle *handle)
     g_resolution       = 300;
     g_br_y_opt_num     = -1;
     g_br_x_opt_num     = -1;
+    g_auto_size_opt_num = -1;
     g_res_opt_num      = -1;
     g_mode             = 1; /* default WIDE; updated to NARROW if br-x is narrow */
 
@@ -403,6 +406,7 @@ sane_get_option_descriptor(SANE_Handle handle, SANE_Int option)
     /* Track option indices for use in sane_control_option */
     if      (strcmp(d->name, "br-x")      == 0) g_br_x_opt_num = option;
     else if (strcmp(d->name, "resolution") == 0) g_res_opt_num  = option;
+    else if (strcmp(d->name, "AutoDocumentSize") == 0) g_auto_size_opt_num = option;
 
     if (strcmp(d->name, "br-y") == 0) {
         g_br_y_opt_num = option;
@@ -433,6 +437,22 @@ SANE_Status sane_control_option(SANE_Handle handle, SANE_Int option,
                                  SANE_Int *info)
 {
     if (action == SANE_ACTION_SET_VALUE && value) {
+
+        /* Keep AutoDocumentSize off. It makes the driver send AREA=ATDSKW,
+         * Brother's automatic crop and deskew, which has no height to extend,
+         * so the scan fails. Simple Scan turns this option on whenever it
+         * exists. */
+        if (option == g_auto_size_opt_num && *(SANE_Bool *)value) {
+            SANE_Bool off = SANE_FALSE;
+            SANE_Status r = b5_ctrl(handle, option, action, &off, info);
+            if (r == SANE_STATUS_GOOD) {
+                *(SANE_Bool *)value = SANE_FALSE;
+                if (info)
+                    *info |= SANE_INFO_INEXACT;
+                fprintf(stderr, "[brother5lp] AutoDocumentSize kept off\n");
+            }
+            return r;
+        }
 
         /* Track resolution */
         if (option == g_res_opt_num)
@@ -560,6 +580,33 @@ static int row_is_filler(const SANE_Byte *row, SANE_Int n)
     return n > 0;
 }
 
+/* Read brscan5's remaining filler so the driver finishes the page. If it is left
+ * mid-page, the next sane_start succeeds without touching the scanner and the
+ * same filler comes back as an empty page, forever, in any frontend that scans
+ * a whole feeder. */
+static void finish_driver_page(SANE_Handle handle)
+{
+    static SANE_Byte sink[1 << 16];
+    long long total = 0;
+    int idle = 0;
+    SANE_Status r;
+
+    for (;;) {
+        SANE_Int got = 0;
+        r = b5_read(handle, sink, sizeof sink, &got);
+        total += got;
+        if (r != SANE_STATUS_GOOD)
+            break;
+        idle = got ? 0 : idle + 1;
+        if (idle > 5000)
+            break;
+        if (!got)
+            usleep(1000);
+    }
+    fprintf(stderr, "[brother5lp] page finished: %lld filler bytes, status %d\n",
+            total, (int)r);
+}
+
 /* Long pages: the scanner's height stays at the driver's cap, so the end of the
  * page is only visible as the start of the filler. Pass whole rows and stop
  * there. Rows are held back so the file never ends on half a filler row. */
@@ -607,6 +654,7 @@ static SANE_Status read_until_filler(SANE_Handle handle, SANE_Byte *data,
                     g_bytes_read / g_row_size);
             g_page_done = 1;
             g_row_fill = 0;
+            finish_driver_page(handle);
         }
     }
     g_bytes_read += *length;
@@ -626,6 +674,10 @@ SANE_Status sane_read(SANE_Handle handle, SANE_Byte *data,
     /* Stop at the end of the real page, before brscan5's grey filler. */
     if (limit >= 0 && g_bytes_read >= limit) {
         *length = 0;
+        if (!g_page_done) {
+            g_page_done = 1;
+            finish_driver_page(handle);
+        }
         return SANE_STATUS_EOF;
     }
     SANE_Status r = b5_read(handle, data, max_length, length);
