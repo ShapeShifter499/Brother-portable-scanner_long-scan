@@ -23,6 +23,9 @@ This project has no tagged releases yet, so entries are grouped by date.
 - `--as-needed` removed libusb from the libraries, so the hook could not find it at runtime. The link now keeps libusb.
 - The misspelled repository URL.
 
+### Documented
+- The DS-740D should scan long paper through its straight pass-through. Flipping the small-space paper tray sends paper around a U-bend.
+
 ### Tested
 Packaged `scan-long` on a Steam Deck with brscan5 1.7.0, one pass on each scanner with a three-sheet test scroll:
 

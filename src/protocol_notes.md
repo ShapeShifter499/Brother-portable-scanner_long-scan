@@ -204,7 +204,7 @@ Tested with a 33 inch taped, two-sided test scroll carrying QR markers.
 
 | Scanner | One-sided long | Reported long max | Feed path |
 |---|---|---|---|
-| DS-740D | 33.5 in, clean; sheet swing up to about 2.7 degrees on one side | 1828.8 mm | U-shaped |
+| DS-740D | 33.5 in, clean; sheet swing up to about 2.7 degrees on one side | 1828.8 mm | U-bend with the small-space tray flipped, otherwise straight |
 | ADS-1200 | 33.0 to 33.1 in, clean, 9 s per side | 914.4 mm, then values 300,300 | Mostly straight |
 
 The stock driver stops the same page with "Document feeder jammed".
@@ -244,8 +244,10 @@ own pass.
 
 ### Feeding
 
-Long paper needs a clear exit and support on both sides. On the DS-740D's U-shaped
-path the exiting end can meet the entering end and fold the page.
+Long paper needs a clear exit and support on both sides. The DS-740D takes a U-bend
+when its small-space paper tray is flipped, and the exiting end can then meet the
+entering end and fold the page. Leave the tray unflipped so paper passes straight
+through.
 
 Both scanners listed under the same SANE name when they shared a USB bus. On
 separate buses the names differ.

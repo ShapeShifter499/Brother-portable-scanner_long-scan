@@ -15,7 +15,7 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 
 | Hardware | Status |
 |---|---|
-| Brother DS-740D | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; U-shaped path, so guide long paper |
+| Brother DS-740D | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; use the straight pass-through for long paper |
 | Brother ADS-1200 | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; reports a 36 in maximum |
 
 > **Long paper is single-sided only.** The scanners reject long paper with duplex.
@@ -80,6 +80,8 @@ Requires: `gcc`, `libsane-dev` (or `sane`), `libusb-1.0-dev`.
 3. Set page height to the maximum you want to scan (e.g. 1000 mm for a long receipt)
 4. Feed the document. Scanning stops automatically when the paper exits
 5. Support long paper on both sides, and keep it clear of the scanner's entry
+
+On the DS-740D, leave the small-space paper tray unflipped so paper passes straight through. Flipping it sends paper around a U-bend, which can bend a long scan.
 
 Choose a single-sided source. The duplex sources do not work with long paper.
 
