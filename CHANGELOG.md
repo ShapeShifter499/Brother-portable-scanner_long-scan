@@ -24,7 +24,7 @@ This project has no tagged releases yet, so entries are grouped by date.
 - The misspelled repository URL.
 
 ### Documented
-- The DS-740D should scan long paper through its straight pass-through. Flipping the small-space paper tray sends paper around a U-bend.
+- The DS-740D should scan long paper with the Output Guide closed, so paper passes straight through. Brother rates the Output Guide for paper up to 297 mm long.
 
 ### Tested
 Packaged `scan-long` on a Steam Deck with brscan5 1.7.0, one pass on each scanner with a three-sheet test scroll:

@@ -15,10 +15,10 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 
 | Hardware | Status |
 |---|---|
-| Brother DS-740D | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; use the straight pass-through for long paper |
+| Brother DS-740D | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; keep the Output Guide closed for long paper |
 | Brother ADS-1200 | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; reports a 36 in maximum |
 
-> **Long paper is single-sided only.** The scanners reject long paper with duplex.
+> **Long paper is single-sided only.** The scanners reject long paper with duplex, and Brother's DS-740D guide says 2-sided scanning is not available for Long Paper.
 > For a two-sided document, scan it once, turn it over, and scan it again.
 
 These results come from `scan-long`. GUI apps have not been retested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
@@ -81,7 +81,7 @@ Requires: `gcc`, `libsane-dev` (or `sane`), `libusb-1.0-dev`.
 4. Feed the document. Scanning stops automatically when the paper exits
 5. Support long paper on both sides, and keep it clear of the scanner's entry
 
-On the DS-740D, leave the small-space paper tray unflipped so paper passes straight through. Flipping it sends paper around a U-bend, which can bend a long scan.
+On the DS-740D, keep the **Output Guide** closed so paper passes straight through. Opening it sends paper around a U-bend and out of the top. Brother rates that route for paper up to 297 mm long, and lists an open Output Guide as a cause of skewed scans and jams.
 
 Choose a single-sided source. The duplex sources do not work with long paper.
 
