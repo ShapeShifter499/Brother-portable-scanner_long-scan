@@ -5,6 +5,8 @@ This project has no tagged releases yet, so entries are grouped by date.
 ## 2026-11-06
 
 ### Added
+- `scan-long` refuses more than 300 dpi on the ADS-1200 before it scans. The scanner rejects it for long paper.
+- `scan-long` warns when a page is cut off at the scanner's maximum length.
 - Arch package files that work with `makepkg`: `pkg/PKGBUILD` and `pkg/.SRCINFO`.
 - The backend is registered by `/etc/sane.d/dll.d/brother5lp`, so **\[Long Paper\]** devices appear with no setup. `make install` writes the same file.
 - `.gitignore` for build and `makepkg` output.
@@ -24,6 +26,9 @@ This project has no tagged releases yet, so entries are grouped by date.
 - `--as-needed` removed libusb from the libraries, so the hook could not find it at runtime. The link now keeps libusb.
 - The misspelled repository URL.
 - Simple Scan reported a jam on long-paper devices. It turns on Auto Document Size, which makes the driver send `AREA=ATDSKW`, and that has no height to extend. The backend now keeps the option off.
+- `Black & White` and `Gray[Error Diffusion]` stopped at 14 inches with no error, whatever the paper length. The driver dropped every line past its page height. Both modes now scan the whole page.
+- Long 1-bit scans on the DS-740D could cancel the whole scan, because the driver counted the scanner's "page too long" notice as a second page. The backend now skips that notice.
+- The end of page log line undercounted rows.
 - Simple Scan hung after a long page, receiving empty pages without end. The backend stopped reading at the start of the filler and left the driver mid-page. It now reads the filler to the end, so the driver reports an empty feeder.
 
 ### Documented
@@ -43,6 +48,21 @@ Simple Scan 50.0 on the same Steam Deck, DS-740D, 300 dpi, All Pages From Feeder
 |---|---|---|
 | Text | True Gray | 2550 x 9919, 4 grey levels |
 | Photo | 24bit Color[Fast] | 2550 x 9935, full colour |
+
+Mode tests on the same Steam Deck, one pass each, with the test scroll extended past the 33 inches above. Every test code on the scroll read correctly:
+
+| Scanner | Mode | Resolution | Length |
+|---|---|---|---|
+| DS-740D | 24bit Color[Fast] | 300 dpi | 44.21 in |
+| DS-740D | 24bit Color[Fast] | 600 dpi | 44.08 in |
+| DS-740D | Black & White | 300 dpi | 44.10 in |
+| DS-740D | Gray[Error Diffusion] | 300 dpi | 44.14 in |
+| ADS-1200 | 24bit Color[Fast] | 300 dpi | 35.79 in |
+| ADS-1200 | Black & White | 300 dpi | 35.72 in |
+| ADS-1200 | Gray[Error Diffusion] | 300 dpi | 35.70 in |
+| ADS-1200, through `scan-long` | Black & White | 300 dpi | 35.68 in |
+
+The two DS-740D 1-bit passes needed a gentle pull at the end. The ADS-1200 refused 600 dpi colour before feeding, and stopped a longer scroll at exactly 36.00 inches. The final build was run only on the ADS-1200. It differs from the DS-740D build in log messages, the page too long check and `scan-long`.
 
 ## 2026-11-04
 

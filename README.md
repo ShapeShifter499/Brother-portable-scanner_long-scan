@@ -15,13 +15,25 @@ This project reverse-engineers the Windows long paper USB protocol and implement
 
 | Hardware | Status |
 |---|---|
-| Brother DS-740D | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; keep the Output Guide closed for long paper |
-| Brother ADS-1200 | ✅ 33 in scan tested with the Arch package on brscan5 1.7.0; reports a 36 in maximum |
+| Brother DS-740D | ✅ 44 in scans tested on brscan5 1.7.0; reports a 72 in maximum; keep the Output Guide closed for long paper |
+| Brother ADS-1200 | ✅ 35 in scans tested on brscan5 1.7.0; reports a 36 in maximum and a 300 dpi limit for long paper |
 
 > **Long paper is single-sided only.** The scanners reject long paper with duplex, and Brother's DS-740D guide says 2-sided scanning is not available for Long Paper.
 > For a two-sided document, scan it once, turn it over, and scan it again.
 
-These results come from `scan-long`. Simple Scan 50.0 has also been tested on the DS-740D in Text and Photo modes. Other GUI apps, and any GUI app on the ADS-1200, have not been tested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
+Modes tested with a long test scroll:
+
+| Mode | DS-740D | ADS-1200 |
+|---|---|---|
+| `24bit Color[Fast]`, 300 dpi | ✅ 44 in | ✅ 35 in |
+| `24bit Color[Fast]`, 600 dpi | ✅ 44 in | ❌ refused by the scanner |
+| `True Gray`, 300 dpi | ✅ 33 in | Not tested |
+| `Black & White`, 300 dpi | ✅ 44 in, may need a tug | ✅ 35 in |
+| `Gray[Error Diffusion]`, 300 dpi | ✅ 44 in, may need a tug | ✅ 35 in |
+
+Simple Scan 50.0 has been tested on the DS-740D in Text and Photo modes at 33 in. Other GUI apps, and any GUI app on the ADS-1200, have not been tested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
+
+Colour at 300 dpi is the best default. Use 600 dpi for fine detail on the DS-740D. It keeps real extra detail, but a 44 in colour scan takes about a minute and is about 400 MB before compression.
 
 **Platform:** Arch Linux (and derivatives). Should work on any distro with `brscan5` and `sane` installed; only an Arch package is provided for now.
 
@@ -91,6 +103,10 @@ In Simple Scan, Text mode saves only 4 shades of grey. Use Photo mode to keep fu
 
 Long scans can end with up to about 1.4 mm of grey at the bottom, where the driver's filler begins. It is left in place, so that real content is never trimmed.
 
+A page longer than the scanner's limit is cut off at the limit, and the scan still finishes normally. `scan-long` warns when this happens. GUI apps do not show the warning, so keep pages within the limit.
+
+On the DS-740D, `Black & White` and `Gray[Error Diffusion]` stopped feeding just before the 44 in test scroll cleared the rollers. Nothing was missing from the scan. Pull the page out gently in the feed direction. Colour scans cleared on their own.
+
 ### CLI
 
 ```bash
@@ -101,7 +117,7 @@ Single-sided only. Options:
 
 ```
 --output FILE       Output file (default: scan_YYYYMMDD_HHMMSS.png)
---resolution DPI    Scan resolution (default: 300)
+--resolution DPI    Scan resolution (default: 300, up to 300 on the ADS-1200)
 --length MM         Maximum length (default: the scanner's reported maximum)
 --device DEVICE     Needed when more than one scanner is connected
 ```

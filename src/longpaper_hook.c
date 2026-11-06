@@ -129,6 +129,8 @@ static unsigned char g_out_endpoint = 0;
 static int g_scan_started = 0;
 static unsigned int g_area_y2 = 0;      /* driver's height cap for this page */
 static unsigned int g_true_height = 0;  /* height the scanner reported */
+static int g_line_data = 0;  /* this scan arrives as lines, not JPEG */
+static int g_after_page_end = 0;  /* the last read was a page end record */
 static int g_abt_seen = 0;
 static cpp_setheight_fn   real_devimg_sh     = NULL; /* DeviceImageJpeg::SetHeight  */
 static cpp_setheight_fn   real_decodeparam_sh= NULL; /* DecodeParameter::SetHeight  */
@@ -462,6 +464,7 @@ static int patch_cmd_long_paper(uint8_t *buf, int len, int max_len,
     /* SSP: set PTYPE and enable LONG flag. */
     if (cmd_is(buf, len, "\x1bSSP\n")) {
         const char *ptype = (mode == 1) ? "LONGPAPER_WIDE" : "LONGPAPER_NARROW";
+        g_line_data = memmem(buf, (size_t)len, "COMP=JPEG", 9) == NULL;
         /* Experiment only: BR5LP_FORCE=area|lsmd|long sends less than the full
          * long-paper setup, to find which flag a scanner rejects when duplex
          * is on. Unset, the full setup below runs as normal. */
@@ -570,6 +573,25 @@ int libusb_bulk_transfer(libusb_device_handle *dev_handle,
     if (endpoint & LIBUSB_ENDPOINT_IN) {
         int rc = real_usb_bulk(dev_handle, endpoint, data, length,
                                actual_length, timeout);
+        /* "Page too long" means two things. Straight after "page end" it is a
+         * notice about a complete page, seen in 1-bit modes on the DS-740D. The
+         * driver counts it as a second page and cancels the whole scan, so read
+         * past it. On its own it means the scanner stopped at its maximum
+         * length, which the driver reports as a normal finish, so say so. */
+        if (g_mode && rc == 0 && actual_length && *actual_length == 4 &&
+            data[0] == 0 && data[1] == 0x23 && data[3] == 0) {
+            if (g_after_page_end) {
+                fprintf(stderr, "[br5longpaper] scanner sent page too long, ignored\n");
+                rc = real_usb_bulk(dev_handle, endpoint, data, length,
+                                   actual_length, timeout);
+            } else {
+                fprintf(stderr, "[br5longpaper] WARNING: scanner reached its maximum"
+                                " length, the end of this page is missing\n");
+            }
+        }
+        if (rc == 0 && actual_length)
+            g_after_page_end = *actual_length == 4 && data[0] == 0 &&
+                               data[1] == 0x21 && data[3] == 0;
         if (debug)
             log_reply(rc, data, actual_length ? *actual_length : 0);
         dump_reply(rc, data, actual_length ? *actual_length : 0);
@@ -934,14 +956,15 @@ SANE_Status sane_start(SANE_Handle handle) {
  * libLxBsScanCoreApi.so to configure the scan pipeline.  By the time any
  * SANE-level hook fires, these values are already locked in.
  *
- * We intercept the C++ mangled symbols directly via LD_PRELOAD.  When
- * long-paper mode is active and the height is at or below the capability
- * cap (< 30 000px = ~100" at 300dpi), we raise it to 65 536px (~218" at
- * 300dpi, 109" at 600dpi), above DS-740D's 72" hardware max.  A height that
- * differs from the driver's cap is the scanner's measurement of the page and
- * is kept, then reused for DecodeParameter: forcing 65 536 there made the
- * decoder wait for rows that never came (seen on brscan5 1.7.0, and the same
- * "Corrupt JPEG" warning is in a March run on the older driver).
+ * We intercept the C++ mangled symbols directly.  What matters is that the
+ * driver's cap never reaches these objects.  brscan5 loads after this library,
+ * outside the scope RTLD_NEXT searches, so the real functions are not found
+ * and the calls below are skipped.  The JPEG then keeps the height in its own
+ * header.  The 65 536 in the log is therefore not applied, and these hooks work
+ * by blocking the cap.  Do not "fix" the lookup without retesting: passing
+ * 65 536 made the decoder wait for rows that never came (seen on brscan5
+ * 1.7.0, and the same "Corrupt JPEG" warning is in a March run on the older
+ * driver).
  *
  * Symbol names (from nm -D libLxBsScanCoreApi.so.3.2.1):
  *   _ZN15DeviceImageJpeg9SetHeightEj   DeviceImageJpeg::SetHeight(unsigned)
@@ -984,6 +1007,61 @@ void _ZN15DecodeParameter9SetHeightEj(void *self, unsigned int h) {
         h = want;
     }
     if (real_decodeparam_sh) real_decodeparam_sh(self, h);
+}
+
+/* ── 9. CReadPreparation_base::IsNormalAreaType ───────────────────
+ *
+ * Black & White and Gray[Error Diffusion] arrive as lines, not JPEG. For a
+ * fixed paper type with a normal area type,
+ * CReadThread_v2::WriteDataBlockToImageDataArray drops every line past the
+ * driver's page height, with no error, however much paper the scanner feeds.
+ * Answering "not normal" turns that limit off. JPEG scans keep the real answer,
+ * because this function also feeds their decoder setup.
+ */
+
+/* brscan5 loads after this library, outside the scope RTLD_NEXT searches, so
+ * look in the core library itself when RTLD_NEXT finds nothing. */
+static void *core_symbol(const char *name)
+{
+    void *sym = dlsym(RTLD_NEXT, name);
+    if (!sym) {
+        void *core = dlopen("libLxBsScanCoreApi.so.3", RTLD_NOW | RTLD_NOLOAD);
+        if (core)
+            sym = dlsym(core, name);
+    }
+    return sym;
+}
+
+typedef bool (*cpp_is_normal_area_fn)(void *self);
+
+bool _ZN6bscore21CReadPreparation_base16IsNormalAreaTypeEv(void *self)
+{
+    static cpp_is_normal_area_fn real;
+    if (!real)
+        real = (cpp_is_normal_area_fn)core_symbol(
+            "_ZN6bscore21CReadPreparation_base16IsNormalAreaTypeEv");
+    ensure_init();
+    if (g_mode && g_line_data)
+        return false;
+    return real ? real(self) : true;
+}
+
+/* Answering "not normal" also makes the driver set a selected area as tall as
+ * its page cap, and ScanDecoder keeps only the rows inside it. With no area it
+ * keeps every row, so leave the area unset for line data. */
+typedef void (*cpp_set_area_fn)(void *self, const void *area);
+
+void _ZN15DecodeParameter15SetSelectedAreaERKNS_4AreaE(void *self, const void *area)
+{
+    static cpp_set_area_fn real;
+    if (!real)
+        real = (cpp_set_area_fn)core_symbol(
+            "_ZN15DecodeParameter15SetSelectedAreaERKNS_4AreaE");
+    ensure_init();
+    if (g_mode && g_line_data)
+        return;
+    if (real)
+        real(self, area);
 }
 
 /* ── 8. BitmapImage::AppendWhiteLines ─────────────────────────────

@@ -15,9 +15,15 @@
 #
 # The scan ends when the paper leaves the feeder. --length is only a ceiling.
 #
-# Reported maximum lengths:
-#   DS-740D:  72 inches (1829 mm)
-#   ADS-1200: 36 inches (914 mm)
+# Reported limits for long paper:
+#   DS-740D:  72 inches (1829 mm), tested at up to 600 dpi
+#   ADS-1200: 36 inches (914 mm), up to 300 dpi
+#
+# A page longer than the limit is cut off at the limit. scan-long warns when this
+# happens.
+#
+# On the DS-740D, "Black & White" and "Gray[Error Diffusion]" can stop feeding just
+# before a long page clears the rollers. Nothing is lost. Pull the page out gently.
 #
 # Support long paper on both sides as it feeds, and keep it clear of the
 # scanner's entry. Press the scanner's button to stop a feed.
@@ -49,7 +55,7 @@ while [[ $# -gt 0 ]]; do
         --device|-d)     DEVICE="$2"; shift 2 ;;
         --output|-o)     OUTPUT_FILE="$2"; shift 2 ;;
         --help|-h)
-            sed -n '2,24p' "$0" | sed 's/^# \?//'
+            sed -n '2,31p' "$0" | sed 's/^# \?//'
             exit 0 ;;
         *)
             EXTRA_ARGS+=("$1"); shift ;;
@@ -85,6 +91,10 @@ MODEL_LINE=$(printf '%s\n' "${LISTING}" | grep -F "${DEVICE}" || true)
 if [[ "${MODEL_LINE}" == *ADS-* ]]; then
     SOURCE="Automatic Document Feeder(center aligned)"
     MAX_MM=914
+    if (( RESOLUTION > 300 )); then
+        echo "ERROR: the ADS-1200 scans long paper at up to 300 dpi." >&2
+        exit 1
+    fi
 else
     SOURCE="Automatic Document Feeder(left aligned)"
     MAX_MM=1829
@@ -117,7 +127,9 @@ echo "  Max length: ${LENGTH_MM} mm (scan auto-stops when paper exits ADF)"
 echo "  Output:     ${OUTPUT_FILE}"
 echo ""
 
-scanimage "${SCAN_ARGS[@]}"
+SCAN_LOG=$(mktemp)
+trap 'rm -f "${SCAN_LOG}"' EXIT
+scanimage "${SCAN_ARGS[@]}" 2>&1 | tee "${SCAN_LOG}"
 
 if [[ ! -f "${PNM_TMP}" ]]; then
     echo "ERROR: scan produced no output file." >&2
@@ -152,6 +164,9 @@ fi
 
 echo ""
 echo "Scan complete: ${OUTPUT_FILE}"
+if grep -q "reached its maximum length" "${SCAN_LOG}"; then
+    echo "WARNING: the page is longer than this scanner's limit. Its end is missing." >&2
+fi
 
 # Report actual scanned dimensions
 if command -v identify >/dev/null 2>&1; then

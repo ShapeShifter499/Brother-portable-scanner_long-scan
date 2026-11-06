@@ -651,7 +651,7 @@ static SANE_Status read_until_filler(SANE_Handle handle, SANE_Byte *data,
         }
         if (g_row_fill == g_row_size && row_is_filler(g_row, g_row_size)) {
             fprintf(stderr, "[brother5lp] end of page at row %lld\n",
-                    g_bytes_read / g_row_size);
+                    (g_bytes_read + *length) / g_row_size);
             g_page_done = 1;
             g_row_fill = 0;
             finish_driver_page(handle);

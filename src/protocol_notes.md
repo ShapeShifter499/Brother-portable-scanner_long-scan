@@ -276,7 +276,8 @@ Tag `0x0306` describes long paper. Lengths are in units of 0.1 mm:
 | `longPaperDuplexLengthSpecificationMethod` | 0 | 0 |
 | `longPaperMaxResolutionX`, `Y` | 0, 0 | 300, 300 |
 
-Whether 0 means the DS-740D has no resolution limit has not been tested.
+A 0 limit on the DS-740D did not stop a 600 dpi colour scan. The ADS-1200 refused
+600 dpi at SSP with result code 0x83, before feeding.
 
 Tag `0x050a` is `autoDocumentSize` and tag `0x050b` is `deskew`. Each holds a
 capability byte, an interlocking byte and an X and Y resolution limit. Both scanners
@@ -285,10 +286,12 @@ report a 300 x 300 limit for each.
 ## Auto Document Size and deskew
 
 `AutoDocumentSize` makes the driver send `AREA=ATDSKW` in place of a numeric area, so
-the hook has no height to extend. Where the correction happens is not known. The
-scanners report it as a capability and the driver has a status message for a deskew
-failure, but `libLxBsScanCoreApi` also contains rotation and paper corner code. Long
-scans send `AREA=NORMAL`, `DSKW=OFF` and `ATCRP=OFF`.
+the hook has no height to extend. Where the correction happens is not proven. The
+scanners report it as a capability, the driver has a status message for a deskew
+failure, and the DS-740D lists `deskewByDevice` in its carrier sheet exclusions. It
+reports corner detection as unsupported, although `libLxBsScanCoreApi` contains
+rotation and paper corner code. Long scans send `AREA=NORMAL`, `DSKW=OFF` and
+`ATCRP=OFF`.
 
 ## End of a long page
 
@@ -300,6 +303,48 @@ returns `SANE_STATUS_NO_DOCS`. Simple Scan accepts that as the end of the docume
 
 The last rows of a page can be mixed with filler by JPEG compression, so they are not
 exactly 128 and are not detected as filler. They appear as up to about 1.4 mm of grey.
+
+## JPEG and line data
+
+Colour and True Gray use JPEG. `Black & White` and `Gray[Error Diffusion]` arrive as
+lines, and the SSP command has no `COMP=JPEG`.
+
+A JPEG's height is in its own header: 22200 at 300 dpi and 44400 at 600 dpi on the
+DS-740D. The last block header holds the height the scanner measured, such as 26436
+for the 44 inch scroll at 600 dpi.
+
+For line data, `CReadThread_v2::WriteDataBlockToImageDataArray` drops each line past
+the page height when the paper type is fixed and `IsNormalAreaType()` is true. The
+hook answers false for line data. That also makes the driver call
+`DecodeParameter::SetSelectedArea` with the same height, and `ScanDecoder` keeps only
+the rows inside that area, so the hook skips that call. A receipt-width crop is not
+applied to line data as a result.
+
+## Hook lookups
+
+brscan5 loads after the hook library, outside the scope `RTLD_NEXT` searches, so
+`dlsym(RTLD_NEXT, ...)` returns NULL for functions in `libLxBsScanCoreApi`. The calls
+to the real `SetHeight` functions are therefore skipped, and the 65536 in the log is
+not applied. Those hooks work by keeping the driver's cap out. Use `core_symbol()` for
+a function that must really be called.
+
+## Page too long
+
+The scanner reports status `0x23`, `00 23 NN 00`, in two situations:
+
+| Scanner | Seen after | Meaning |
+|---|---|---|
+| DS-740D, 1-bit modes, 44 inch page | `00 21 NN 00`, page end | The page is complete. The driver counts this as a second page and cancels the scan, so the hook skips it. The feed stops just before the paper clears the rollers. |
+| ADS-1200, page over 36 inches | Line data, with no page end | The scanner stopped at its limit. The end of the page is missing, and the driver reports a normal finish. The hook logs a warning. |
+
+The DS-740D did not send it for colour at 44 inches. The length where it starts in
+1-bit modes is not known.
+
+## Driver debug log
+
+`libLxBsScanCoreApi` writes text logs when `$HOME/BrOutLog/BrSetupLog.txt` exists.
+Each line is `Key=Value`, for example `LogLevel=5`. Do not enable the `Dump` keys on
+private material, because they save image data.
 
 Both scanners listed under the same SANE name when they shared a USB bus. On
 separate buses the names differ.
