@@ -337,8 +337,8 @@ The scanner reports status `0x23`, `00 23 NN 00`, in two situations:
 | DS-740D, 1-bit modes, 44 inch page | `00 21 NN 00`, page end | The page is complete. The driver counts this as a second page and cancels the scan, so the hook skips it. The feed stops just before the paper clears the rollers. |
 | ADS-1200, page over 36 inches | Line data, with no page end | The scanner stopped at its limit. The end of the page is missing, and the driver reports a normal finish. The hook logs a warning. |
 
-The DS-740D did not send it for colour at 44 inches. The length where it starts in
-1-bit modes is not known.
+The DS-740D did not send it for colour at 44 inches, or for `Black & White` at 35.8
+inches, so in 1-bit modes it starts somewhere between 35.8 and 44 inches.
 
 ## Driver debug log
 

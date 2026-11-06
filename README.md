@@ -27,9 +27,9 @@ Modes tested with a long test scroll:
 |---|---|---|
 | `24bit Color[Fast]`, 300 dpi | ✅ 44 in | ✅ 35 in |
 | `24bit Color[Fast]`, 600 dpi | ✅ 44 in | ❌ refused by the scanner |
-| `True Gray`, 300 dpi | ✅ 33 in | Not tested |
-| `Black & White`, 300 dpi | ✅ 44 in, may need a tug | ✅ 35 in |
-| `Gray[Error Diffusion]`, 300 dpi | ✅ 44 in, may need a tug | ✅ 35 in |
+| `True Gray`, 300 dpi | ✅ 35 in | Not tested |
+| `Black & White`, 300 dpi | ✅ 44 in, needs a tug at that length | ✅ 35 in |
+| `Gray[Error Diffusion]`, 300 dpi | ✅ 44 in, needs a tug at that length | ✅ 35 in |
 
 Simple Scan 50.0 has been tested on the DS-740D in Text and Photo modes at 33 in. Other GUI apps, and any GUI app on the ADS-1200, have not been tested on brscan5 1.7.0. See the [changelog](CHANGELOG.md) for recent changes.
 
@@ -105,7 +105,7 @@ Long scans can end with up to about 1.4 mm of grey at the bottom, where the driv
 
 A page longer than the scanner's limit is cut off at the limit, and the scan still finishes normally. `scan-long` warns when this happens. GUI apps do not show the warning, so keep pages within the limit.
 
-On the DS-740D, `Black & White` and `Gray[Error Diffusion]` stopped feeding just before the 44 in test scroll cleared the rollers. Nothing was missing from the scan. Pull the page out gently in the feed direction. Colour scans cleared on their own.
+On the DS-740D, `Black & White` and `Gray[Error Diffusion]` stopped feeding just before the 44 in test scroll cleared the rollers. Nothing was missing from the scan. Pull the page out gently in the feed direction. `Black & White` cleared on its own at 35.8 in, and colour cleared on its own at 44 in.
 
 ### CLI
 

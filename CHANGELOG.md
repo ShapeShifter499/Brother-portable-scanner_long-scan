@@ -61,8 +61,10 @@ Mode tests on the same Steam Deck, one pass each, with the test scroll extended 
 | ADS-1200 | Black & White | 300 dpi | 35.72 in |
 | ADS-1200 | Gray[Error Diffusion] | 300 dpi | 35.70 in |
 | ADS-1200, through `scan-long` | Black & White | 300 dpi | 35.68 in |
+| DS-740D, through `scan-long` | True Gray | 300 dpi | 35.84 in |
+| DS-740D, through `scan-long` | Black & White | 300 dpi | 35.80 in |
 
-The two DS-740D 1-bit passes needed a gentle pull at the end. The ADS-1200 refused 600 dpi colour before feeding, and stopped a longer scroll at exactly 36.00 inches. The final build was run only on the ADS-1200. It differs from the DS-740D build in log messages, the page too long check and `scan-long`.
+The two 44 inch DS-740D 1-bit passes needed a gentle pull at the end. The 35.80 inch pass did not. The ADS-1200 refused 600 dpi colour before feeding, and stopped a longer scroll at exactly 36.00 inches. The `scan-long` passes used the final build. The 44 inch passes used an earlier build, which differs in log messages, the page too long check and `scan-long`.
 
 ## 2026-11-04
 
